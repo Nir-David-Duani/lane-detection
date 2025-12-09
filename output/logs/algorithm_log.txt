@@ -53,7 +53,7 @@ lane-detection
             __init__.py
 
 -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-stage 1
+stage 1 - Pre-processing Stage – Frames Extraction
 -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 Pre-processing Stage – Frames Extraction
 
@@ -85,6 +85,47 @@ Start exploring the selected frames in a dedicated notebook (01_explore_frames.i
 
 
 -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-stage 2 
+Stage 2 — Frame Exploration & Pattern Identification
 -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
+Stage 2 — Frame Exploration & Pattern Identification
+
+Status: In Progress
+Description:
+Loaded and visualized the 36 curated sample frames inside the notebook (01_explore_frames.ipynb).
+The goal of this stage is to understand the visual variability in the dataset and identify parameters that must be robust across all scenarios.
+
+The frame exploration focused on:
+
+Differences in lighting 
+
+Road curvature and perspective distortion
+
+Variability in lane-marker width, color (white/yellow), and visibility
+
+Occlusions from nearby vehicles
+
+Frames where the host vehicle performs a lane change
+
+Frames where other vehicles merge or cross lanes
+
+These observations will guide the selection of:
+
+ROI (Region of Interest) shape
+
+Color threshold ranges for lane markings
+
+Canny thresholds
+
+Hough parameter ranges
+
+Smoothing/temporal filtering strategy
+
+Lane-change detection logic
+
+Next steps:
+Define ROI geometry and test it across representative frames. Prepare initial binary masks for white and yellow lane markings.
+
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Stage 3
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
