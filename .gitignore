@@ -1,0 +1,10 @@
+# Videos
+*.mp4
+*.avi
+*.mov
+*.mkv
+
+# specific folders
+data/raw/
+data/processed/*.mp4
+data/processed/*.avi
