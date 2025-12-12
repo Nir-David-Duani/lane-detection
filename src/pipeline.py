@@ -7,7 +7,7 @@ Each function is tuned and validated in the corresponding Jupyter notebook.
 Pipeline stages:
 1. ROI Masking - apply_roi_mask()
 2. Color Thresholding - apply_color_threshold()
-3. Edge Detection - (coming soon)
+3. Edge Detection - apply_canny()
 4. Line Detection - (coming soon)
 5. Lane Fitting - (coming soon)
 """
@@ -105,7 +105,35 @@ def apply_color_threshold(frame_roi):
 
 
 # ============================================================
-#                  3. VISUALIZATION HELPERS
+#                3. EDGE DETECTION (CANNY)
+# ============================================================
+
+def apply_canny(mask, low_threshold=50, high_threshold=150, blur_kernel=5):
+    """
+    Apply Canny edge detection to extract precise lane line edges.
+    
+    Parameters tuned in: 04_canny_edge_detection.ipynb
+    
+    Args:
+        mask: Binary mask from color thresholding (grayscale, 0-255)
+        low_threshold: Lower threshold for hysteresis (default: 50)
+        high_threshold: Upper threshold for hysteresis (default: 150)
+        blur_kernel: Gaussian blur kernel size, must be odd (default: 5)
+    
+    Returns:
+        edges: Binary edge map (255 = edge, 0 = no edge)
+    """
+    # Apply Gaussian blur to reduce noise
+    blurred = cv2.GaussianBlur(mask, (blur_kernel, blur_kernel), 0)
+    
+    # Apply Canny edge detection
+    edges = cv2.Canny(blurred, low_threshold, high_threshold)
+    
+    return edges
+
+
+# ============================================================
+#                  4. VISUALIZATION HELPERS
 # ============================================================
 
 def draw_roi_outline(frame, pts, color=(0, 255, 0), thickness=3):
