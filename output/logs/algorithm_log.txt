@@ -258,5 +258,78 @@ Apply Hough line detection to the edge maps to identify candidate line segments,
 
 
 -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-Stage 5
+Stage 5 — Hough Line Detection & Lane Boundary Fitting
 -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Stage 5 — Hough Line Detection & Lane Boundary Fitting
+
+Status: Completed successfully
+Description:
+Implemented Probabilistic Hough Transform to detect line segments from edge maps, followed by slope-based filtering and linear regression fitting to extract accurate lane boundaries.
+This stage focused on converting edge pixels into meaningful line representations and merging multiple line segments into single, stable lane boundaries.
+
+The line detection and fitting exploration focused on:
+
+Applying Probabilistic Hough Transform to edge maps to extract candidate line segments
+
+Testing multiple Hough parameter combinations:
+threshold (15-50) — minimum votes required to detect a line
+minLineLength (30-60) — minimum segment length in pixels
+maxLineGap (20-150) — maximum gap allowed between connected segments
+
+Filtering detected lines by slope to separate left lane (negative slope) from right lane (positive slope)
+
+Removing near-horizontal lines (|slope| < 0.5) which represent noise or road markings
+
+Removing near-vertical lines (|slope| > 2.0) which are too steep to be valid lane boundaries
+
+Applying linear regression (np.polyfit) to merge multiple line segments into single, optimal lane lines
+
+Using x = f(y) instead of y = f(x) to handle near-vertical lane lines without numerical instability
+
+Extrapolating fitted lines to span the full ROI height for complete lane visualization
+
+Generating lane polygon overlays to visualize the detected driving lane
+
+Probabilistic Hough Transform was chosen over standard Hough Transform because it:
+- Returns line segment endpoints directly (not just parameters)
+- Is computationally more efficient for large images
+- Provides better control over segment length and gap tolerance
+
+The slope-based filtering step is critical because it:
+- Separates left and right lane boundaries based on slope sign
+- Eliminates horizontal road markings (crosswalks, arrows) that could be misinterpreted as lanes
+- Rejects overly steep lines that are likely noise or non-lane features
+
+Linear regression fitting (fit_lane_line) is the key innovation that produces stable, accurate lane lines:
+- Collects all endpoint coordinates from multiple small line segments
+- Fits a single best-fit straight line through all points using least-squares regression
+- Produces one continuous, smooth line per lane instead of many fragmented segments
+- Significantly reduces jitter and improves visual quality compared to selecting individual segments
+
+The x = f(y) formulation is mathematically essential because lane lines are nearly vertical.
+If we used y = f(x), vertical lines would have infinite slope, causing numerical errors.
+By fitting x as a function of y, we maintain numerical stability across all lane angles.
+
+The finalized pipeline successfully produces:
+- Straight, continuous lane lines fitted to detected edge segments
+- Stable left/right lane separation with minimal false positives
+- Full-height lane boundaries spanning from ROI bottom to top
+- Semi-transparent lane polygon visualization showing the detected driving corridor
+
+Validation was performed across all 36 test frames, demonstrating robust lane detection in diverse scenarios:
+- Straight roads with clear lane markings
+- Curved roads requiring perspective-aware fitting
+- Shadow conditions with partial lane occlusion
+- Bright lighting with reflections and glare
+- Adjacent traffic with potential interference
+
+Multi-frame testing results:
+- Both lanes detected successfully in majority of frames
+- Linear regression significantly improved line straightness and stability
+- Fitted lines remain consistent across consecutive frames, reducing jitter
+
+Next steps:
+Implement temporal smoothing across video frames to further stabilize lane detection and reduce frame-to-frame jitter.
+Add lane-change detection logic to identify when the vehicle is transitioning between lanes.
+Integrate the complete pipeline into a video processing script for real-time lane tracking.

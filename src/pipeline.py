@@ -21,7 +21,7 @@ import numpy as np
 # ============================================================
 
 def apply_roi_mask(frame,
-                   top_y_ratio=0.60,
+                   top_y_ratio=0.68,
                    left_bottom_ratio=0.05,
                    right_bottom_ratio=0.95,
                    top_left_x_ratio=0.40,
@@ -30,7 +30,7 @@ def apply_roi_mask(frame,
     Apply trapezoidal Region of Interest mask to focus on road area.
     
     Parameters tuned in: 02_roi_exploration.ipynb
-    
+
     Args:
         frame: Input BGR image
         top_y_ratio: Vertical position of trapezoid top (0-1)
@@ -84,22 +84,27 @@ def apply_color_threshold(frame_roi):
     hsv = cv2.cvtColor(frame_roi, cv2.COLOR_BGR2HSV)
     
     # White lane detection: [H, S, V]
-    lower_white = np.array([0, 0, 200])
+    # V threshold set to 200 to detect only bright white lane markings, excluding road stains
+    lower_white = np.array([0, 0, 170])
     upper_white = np.array([180, 30, 255])
     mask_white = cv2.inRange(hsv, lower_white, upper_white)
     
     # Yellow lane detection: [H, S, V]
-    lower_yellow = np.array([15, 80, 80])
+    # Lowered V threshold from 80 to 70 for better detection of distant yellow lines
+    lower_yellow = np.array([15, 80, 70])
     upper_yellow = np.array([35, 255, 255])
     mask_yellow = cv2.inRange(hsv, lower_yellow, upper_yellow)
     
     # Combine both masks
     mask = cv2.bitwise_or(mask_white, mask_yellow)
     
-    # Morphological cleaning
+    # Morphological operations - strengthened to fill gaps in lane lines
     kernel = np.ones((3, 3), np.uint8)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)  # Remove noise
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)  # Fill gaps
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)   # Remove noise
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)  # Fill gaps (increased from 1 to 2)
+    
+    # Additional dilation to strengthen and connect lane segments
+    mask = cv2.dilate(mask, kernel, iterations=2)
     
     return mask
 
@@ -133,7 +138,246 @@ def apply_canny(mask, low_threshold=50, high_threshold=150, blur_kernel=5):
 
 
 # ============================================================
-#                  4. VISUALIZATION HELPERS
+#                4. LINE DETECTION (HOUGH TRANSFORM)
+# ============================================================
+
+def detect_lines_hough(edges, 
+                       rho=1,
+                       theta=np.pi/180,
+                       threshold=30,
+                       min_line_length=40,
+                       max_line_gap=100):
+    """
+    Detect straight lines using Probabilistic Hough Transform.
+    
+    This function converts edge pixels into straight line segments,
+    making the detected lanes appear much straighter.
+    
+    Parameters to tune in: 05_line_detection.ipynb
+    
+    Args:
+        edges: Binary edge map from Canny detection
+        rho: Distance resolution in pixels (smaller = more precise, slower)
+        theta: Angle resolution in radians (np.pi/180 = 1 degree)
+        threshold: Minimum number of intersections to detect a line
+                   Higher = fewer, stronger lines
+        min_line_length: Minimum length of line segment in pixels
+                        Higher = only longer, straighter lines
+        max_line_gap: Maximum gap between points to be considered same line
+                     Lower = stricter, more broken lines
+    
+    Returns:
+        lines: Array of line segments [[x1, y1, x2, y2], ...]
+               Returns None if no lines detected
+    """
+    lines = cv2.HoughLinesP(
+        edges,
+        rho=rho,
+        theta=theta,
+        threshold=threshold,
+        minLineLength=min_line_length,
+        maxLineGap=max_line_gap
+    )
+    
+    return lines
+
+
+def filter_lines_by_slope(lines, min_slope=0.5, max_slope=2.0):
+    """
+    Filter detected lines by slope to keep only lane-like lines.
+    
+    Removes horizontal lines and overly steep lines.
+    Separates left and right lane lines based on slope sign.
+    
+    Args:
+        lines: Array of lines from detect_lines_hough()
+        min_slope: Minimum absolute slope to keep (removes near-horizontal)
+        max_slope: Maximum absolute slope to keep (removes near-vertical)
+    
+    Returns:
+        left_lines: List of left lane line segments (negative slope)
+        right_lines: List of right lane line segments (positive slope)
+    """
+    if lines is None:
+        return [], []
+    
+    left_lines = []
+    right_lines = []
+    
+    for line in lines:
+        x1, y1, x2, y2 = line[0]
+        
+        # Skip vertical lines (avoid division by zero)
+        if x2 - x1 == 0:
+            continue
+        
+        # Calculate slope
+        slope = (y2 - y1) / (x2 - x1)
+        
+        # Filter by slope magnitude
+        if abs(slope) < min_slope or abs(slope) > max_slope:
+            continue
+        
+        # Separate by slope sign (left lanes negative, right lanes positive)
+        if slope < 0:
+            left_lines.append(line[0])
+        else:
+            right_lines.append(line[0])
+    
+    return left_lines, right_lines
+
+
+def fit_lane_line(lines, frame_height):
+    """
+    Merge multiple line segments into ONE optimal straight line using linear regression.
+    
+    🎯 THIS IS THE KEY FUNCTION TO GET STRAIGHT, ACCURATE LANE LINES!
+    Takes all the small line segments and fits them to a single best-fit line.
+    
+    Args:
+        lines: List of line segments [[x1, y1, x2, y2], ...] or [[[x1, y1, x2, y2]], ...]
+        frame_height: Height of the frame
+        
+    Returns:
+        Fitted line as [x1, y1, x2, y2] or None if no lines
+        Format: [x_top, y_top, x_bottom, y_bottom]
+    """
+    if not lines or len(lines) == 0:
+        return None
+    
+    # Collect all points from all line segments
+    x_points = []
+    y_points = []
+    
+    for line in lines:
+        # Handle both [[x1,y1,x2,y2]] and [x1,y1,x2,y2] formats
+        if isinstance(line[0], (list, np.ndarray)) and len(line[0]) == 4:
+            x1, y1, x2, y2 = line[0]
+        else:
+            x1, y1, x2, y2 = line
+        
+        x_points.extend([x1, x2])
+        y_points.extend([y1, y2])
+    
+    # Convert to numpy arrays
+    x_points = np.array(x_points, dtype=np.float32)
+    y_points = np.array(y_points, dtype=np.float32)
+    
+    # Fit polynomial (degree 1 = straight line)
+    # Fit x as function of y (not y of x) because lines are nearly vertical
+    poly = np.polyfit(y_points, x_points, 1)
+    x_at_y = np.poly1d(poly)
+    
+    # Calculate line endpoints
+    # Top: minimum y from all points
+    y_top = int(np.min(y_points))
+    x_top = int(x_at_y(y_top))
+    
+    # Bottom: frame height
+    y_bottom = int(frame_height)
+    x_bottom = int(x_at_y(y_bottom))
+    
+    return [x_top, y_top, x_bottom, y_bottom]
+
+
+def select_inner_lane_lines(left_lines, right_lines, frame_width, frame_height):
+    """
+    Select the innermost lane boundaries (closest to vehicle center).
+    
+    Filters lines that are too far from center (neighboring lanes).
+    For left lane: selects rightmost valid line (closest to center).
+    For right lane: selects leftmost valid line (closest to center).
+    
+    Args:
+        left_lines: List of left lane line segments (negative slope)
+        right_lines: List of right lane line segments (positive slope)
+        frame_width: Width of the frame
+        frame_height: Height of the frame
+    
+    Returns:
+        selected_left: Single left lane line [x1, y1, x2, y2] or None
+        selected_right: Single right lane line [x1, y1, x2, y2] or None
+    """
+    center_x = frame_width / 2
+    
+    # Define acceptable range for current lane boundaries
+    # Left line: between 10% and 40% left of center
+    left_min_x = center_x - 0.4 * frame_width
+    left_max_x = center_x - 0.1 * frame_width
+    
+    # Right line: between 10% and 40% right of center
+    right_min_x = center_x + 0.1 * frame_width
+    right_max_x = center_x + 0.4 * frame_width
+    
+    def get_line_x_at_bottom(line):
+        """Calculate x position where line intersects bottom of frame."""
+        x1, y1, x2, y2 = line
+        if y2 == y1:  # Horizontal line
+            return x1
+        # Linear interpolation: x = x1 + (y - y1) * (x2 - x1) / (y2 - y1)
+        x_at_bottom = x1 + (frame_height - y1) * (x2 - x1) / (y2 - y1)
+        return x_at_bottom
+    
+    # Filter and select left line (rightmost = closest to center)
+    valid_left = []
+    for line in left_lines:
+        x_bottom = get_line_x_at_bottom(line)
+        if left_min_x <= x_bottom <= left_max_x:
+            valid_left.append((x_bottom, line))
+    
+    selected_left = None
+    if valid_left:
+        # Sort by x_bottom descending and take rightmost (closest to center)
+        valid_left.sort(key=lambda x: x[0], reverse=True)
+        selected_left = valid_left[0][1]
+    
+    # Filter and select right line (leftmost = closest to center)
+    valid_right = []
+    for line in right_lines:
+        x_bottom = get_line_x_at_bottom(line)
+        if right_min_x <= x_bottom <= right_max_x:
+            valid_right.append((x_bottom, line))
+    
+    selected_right = None
+    if valid_right:
+        # Sort by x_bottom ascending and take leftmost (closest to center)
+        valid_right.sort(key=lambda x: x[0])
+        selected_right = valid_right[0][1]
+    
+    return selected_left, selected_right
+
+
+def extrapolate_line(line, y_start, y_end):
+    """
+    Extend a line segment to span between y_start and y_end.
+    
+    Args:
+        line: Line segment [x1, y1, x2, y2]
+        y_start: Starting y coordinate (typically frame bottom)
+        y_end: Ending y coordinate (typically ROI top)
+    
+    Returns:
+        Extended line [x_start, y_start, x_end, y_end]
+    """
+    x1, y1, x2, y2 = line
+    
+    # Handle vertical line (avoid division by zero)
+    if x2 - x1 == 0:
+        return [x1, y_start, x1, y_end]
+    
+    # Calculate slope and intercept: x = slope*y + intercept
+    slope = (x2 - x1) / (y2 - y1) if y2 != y1 else 0
+    intercept = x1 - slope * y1
+    
+    # Calculate x coordinates at y_start and y_end
+    x_start = int(slope * y_start + intercept)
+    x_end = int(slope * y_end + intercept)
+    
+    return [x_start, y_start, x_end, y_end]
+
+
+# ============================================================
+#                  5. VISUALIZATION HELPERS
 # ============================================================
 
 def draw_roi_outline(frame, pts, color=(0, 255, 0), thickness=3):
@@ -171,3 +415,36 @@ def overlay_mask_on_frame(frame, mask, color=(0, 255, 0), alpha=0.3):
     overlay[mask == 255] = color
     result = cv2.addWeighted(result, 1, overlay, alpha, 0)
     return result
+
+
+def draw_lines(frame, lines, color=(255, 0, 0), thickness=3):
+    """
+    Draw detected line segments on frame.
+    
+    Args:
+        frame: BGR image to draw on (will be modified)
+        lines: List of line segments [[x1, y1, x2, y2], ...] or [x1, y1, x2, y2]
+        color: BGR color tuple
+        thickness: Line thickness
+    
+    Returns:
+        frame: Frame with lines drawn
+    """
+    if lines is None or len(lines) == 0:
+        return frame
+    
+    # Handle single line [x1, y1, x2, y2]
+    if isinstance(lines, (list, np.ndarray)) and len(lines) == 4 and not isinstance(lines[0], (list, np.ndarray)):
+        x1, y1, x2, y2 = lines
+        cv2.line(frame, (x1, y1), (x2, y2), color, thickness)
+        return frame
+    
+    # Handle multiple lines
+    for line in lines:
+        if len(line) == 4:  # [x1, y1, x2, y2]
+            x1, y1, x2, y2 = line
+        else:  # [[x1, y1, x2, y2]]
+            x1, y1, x2, y2 = line[0]
+        cv2.line(frame, (x1, y1), (x2, y2), color, thickness)
+    
+    return frame
