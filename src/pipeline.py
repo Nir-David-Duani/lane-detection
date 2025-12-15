@@ -21,11 +21,11 @@ import numpy as np
 # ============================================================
 
 def apply_roi_mask(frame,
-                   top_y_ratio=0.68,
+                   top_y_ratio=0.58,
                    left_bottom_ratio=0.05,
-                   right_bottom_ratio=0.95,
-                   top_left_x_ratio=0.40,
-                   top_right_x_ratio=0.60):
+                   right_bottom_ratio=0.98,
+                   top_left_x_ratio=0.25,
+                   top_right_x_ratio=0.80):
     """
     Apply trapezoidal Region of Interest mask to focus on road area.
     
@@ -84,14 +84,18 @@ def apply_color_threshold(frame_roi):
     hsv = cv2.cvtColor(frame_roi, cv2.COLOR_BGR2HSV)
     
     # White lane detection: [H, S, V]
-    # V threshold set to 200 to detect only bright white lane markings, excluding road stains
-    lower_white = np.array([0, 0, 170])
+    # Balanced thresholds to detect white lanes while avoiding gray road surface:
+    # - V ≥ 190 (sweet spot between too strict and too loose)
+    # - S ≤ 30 - pure whites, minimal gray colors
+    lower_white = np.array([0, 0, 190])
     upper_white = np.array([180, 30, 255])
     mask_white = cv2.inRange(hsv, lower_white, upper_white)
     
     # Yellow lane detection: [H, S, V]
-    # Lowered V threshold from 80 to 70 for better detection of distant yellow lines
-    lower_yellow = np.array([15, 80, 70])
+    # Balanced thresholds for better yellow detection:
+    # - S ≥ 70 (lowered from 100) - detect less saturated/faded yellows
+    # - V ≥ 60 (lowered from 70) - detect darker/distant yellow lines
+    lower_yellow = np.array([15, 70, 60])
     upper_yellow = np.array([35, 255, 255])
     mask_yellow = cv2.inRange(hsv, lower_yellow, upper_yellow)
     
@@ -278,73 +282,6 @@ def fit_lane_line(lines, frame_height):
     x_bottom = int(x_at_y(y_bottom))
     
     return [x_top, y_top, x_bottom, y_bottom]
-
-
-def select_inner_lane_lines(left_lines, right_lines, frame_width, frame_height):
-    """
-    Select the innermost lane boundaries (closest to vehicle center).
-    
-    Filters lines that are too far from center (neighboring lanes).
-    For left lane: selects rightmost valid line (closest to center).
-    For right lane: selects leftmost valid line (closest to center).
-    
-    Args:
-        left_lines: List of left lane line segments (negative slope)
-        right_lines: List of right lane line segments (positive slope)
-        frame_width: Width of the frame
-        frame_height: Height of the frame
-    
-    Returns:
-        selected_left: Single left lane line [x1, y1, x2, y2] or None
-        selected_right: Single right lane line [x1, y1, x2, y2] or None
-    """
-    center_x = frame_width / 2
-    
-    # Define acceptable range for current lane boundaries
-    # Left line: between 10% and 40% left of center
-    left_min_x = center_x - 0.4 * frame_width
-    left_max_x = center_x - 0.1 * frame_width
-    
-    # Right line: between 10% and 40% right of center
-    right_min_x = center_x + 0.1 * frame_width
-    right_max_x = center_x + 0.4 * frame_width
-    
-    def get_line_x_at_bottom(line):
-        """Calculate x position where line intersects bottom of frame."""
-        x1, y1, x2, y2 = line
-        if y2 == y1:  # Horizontal line
-            return x1
-        # Linear interpolation: x = x1 + (y - y1) * (x2 - x1) / (y2 - y1)
-        x_at_bottom = x1 + (frame_height - y1) * (x2 - x1) / (y2 - y1)
-        return x_at_bottom
-    
-    # Filter and select left line (rightmost = closest to center)
-    valid_left = []
-    for line in left_lines:
-        x_bottom = get_line_x_at_bottom(line)
-        if left_min_x <= x_bottom <= left_max_x:
-            valid_left.append((x_bottom, line))
-    
-    selected_left = None
-    if valid_left:
-        # Sort by x_bottom descending and take rightmost (closest to center)
-        valid_left.sort(key=lambda x: x[0], reverse=True)
-        selected_left = valid_left[0][1]
-    
-    # Filter and select right line (leftmost = closest to center)
-    valid_right = []
-    for line in right_lines:
-        x_bottom = get_line_x_at_bottom(line)
-        if right_min_x <= x_bottom <= right_max_x:
-            valid_right.append((x_bottom, line))
-    
-    selected_right = None
-    if valid_right:
-        # Sort by x_bottom ascending and take leftmost (closest to center)
-        valid_right.sort(key=lambda x: x[0])
-        selected_right = valid_right[0][1]
-    
-    return selected_left, selected_right
 
 
 def extrapolate_line(line, y_start, y_end):
