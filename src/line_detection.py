@@ -397,28 +397,48 @@ def process_video(video_path, output_path, max_frames=None, start_frame=0):
             continue
         
         # ============ PIPELINE (from pipeline.py) ============
+        # All parameters here are the concrete "lane-detection" tuning.
         
-        # Fixed ROI parameters
-        top_y_ratio = 0.6
-        top_left_x = 0.40
-        top_right_x = 0.65
+        # 1. ROI (trapezoid over the road)
+        roi_params = {
+            "top_y_ratio": 0.6,
+            "left_bottom_ratio": 0.05,
+            "right_bottom_ratio": 0.98,
+            "top_left_x_ratio": 0.40,
+            "top_right_x_ratio": 0.65,
+        }
+        frame_roi, roi_pts = apply_roi_mask(frame, **roi_params)
         
-        # 1. ROI
-        frame_roi, roi_pts = apply_roi_mask(
-            frame,
-            top_y_ratio=top_y_ratio,
-            top_left_x_ratio=top_left_x,
-            top_right_x_ratio=top_right_x
-        )
-        
-        # 2. Color threshold
-        color_mask = apply_color_threshold(frame_roi)
+        # 2. Color threshold (white & yellow lanes)
+        color_params = {
+            "white_lower": (0, 0, 190),
+            "white_upper": (180, 20, 255),
+            "yellow_lower": (15, 60, 50),
+            "yellow_upper": (35, 255, 255),
+            "morph_kernel_size": 3,
+            "morph_open_iter": 1,
+            "morph_close_iter": 2,
+            "morph_dilate_iter": 2,
+        }
+        color_mask = apply_color_threshold(frame_roi, **color_params)
         
         # 3. Canny edges
-        edges = apply_canny(color_mask)
+        canny_params = {
+            "low_threshold": 50,
+            "high_threshold": 150,
+            "blur_kernel": 5,
+        }
+        edges = apply_canny(color_mask, **canny_params)
         
         # 4. Detect lines (Hough)
-        lines = detect_lines_hough(edges, threshold=15, min_line_length=40, max_line_gap=20)
+        hough_params = {
+            "rho": 1,
+            "theta": np.pi / 180,
+            "threshold": 15,
+            "min_line_length": 40,
+            "max_line_gap": 20,
+        }
+        lines = detect_lines_hough(edges, **hough_params)
         
         # ============ LINE DETECTION & PROCESSING ============
         

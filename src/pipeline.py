@@ -18,17 +18,22 @@ import numpy as np
 #                    1. ROI MASKING
 # ============================================================
 
-def apply_roi_mask(frame,
-                   top_y_ratio=0.58,
-                   left_bottom_ratio=0.05,
-                   right_bottom_ratio=0.98,
-                   top_left_x_ratio=0.25,
-                   top_right_x_ratio=0.80):
+def apply_roi_mask(
+    frame,
+    top_y_ratio,
+    left_bottom_ratio,
+    right_bottom_ratio,
+    top_left_x_ratio,
+    top_right_x_ratio,
+):
     """
-    Apply trapezoidal Region of Interest mask to focus on road area.
+    Apply a trapezoidal Region of Interest mask.
     
-    Parameters tuned in: 02_roi_exploration.ipynb
-
+    This is a generic geometric operation that uses normalized
+    ratios (0–1) along image width/height. It does not assume
+    any specific camera or road layout – those are encoded only
+    in the ratios passed in by the caller.
+    
     Args:
         frame: Input BGR image
         top_y_ratio: Vertical position of trapezoid top (0-1)
@@ -43,7 +48,7 @@ def apply_roi_mask(frame,
     """
     h, w = frame.shape[:2]
     
-    # Define trapezoid vertices
+    # Define trapezoid vertices (purely from ratios)
     pts = np.array([[
         (int(w * left_bottom_ratio),  h),
         (int(w * right_bottom_ratio), h),
@@ -63,44 +68,62 @@ def apply_roi_mask(frame,
 #                2. COLOR THRESHOLDING
 # ============================================================
 
-def apply_color_threshold(frame_roi):
+def apply_color_threshold(
+    frame_roi,
+    white_lower,
+    white_upper,
+    yellow_lower,
+    yellow_upper,
+    morph_kernel_size,
+    morph_open_iter,
+    morph_close_iter,
+    morph_dilate_iter,
+):
     """
-    Apply HSV color thresholding to detect white and yellow lane lines.
+    Generic HSV color thresholding + morphology.
     
-    Parameters tuned in: 03_color_thresholding.ipynb
-    
-    White lanes: High brightness (V), low saturation (S)
-    Yellow lanes: Hue around 15-35 degrees
+    All numeric parameters (HSV bounds, kernel size, iterations) are
+    provided by the caller so this function is independent of any
+    specific task (lane detection, object detection, etc.).
     
     Args:
         frame_roi: Input BGR image (typically after ROI masking)
+        white_lower: Lower HSV bound (tuple-like of 3 ints)
+        white_upper: Upper HSV bound (tuple-like of 3 ints)
+        yellow_lower: Lower HSV bound (tuple-like of 3 ints)
+        yellow_upper: Upper HSV bound (tuple-like of 3 ints)
+        morph_kernel_size: Size of square kernel for morphology ops
+        morph_open_iter: Iterations for opening
+        morph_close_iter: Iterations for closing
+        morph_dilate_iter: Iterations for dilation
     
     Returns:
-        mask: Binary mask (255 = lane pixels, 0 = background)
+        mask: Binary mask (255 = foreground pixels, 0 = background)
     """
     # Convert to HSV color space
     hsv = cv2.cvtColor(frame_roi, cv2.COLOR_BGR2HSV)
     
-    # White lane detection: [H, S, V]
-    # S <= 20 to avoid detecting white cars and gray areas
-    lower_white = np.array([0, 0, 190])
-    upper_white = np.array([180, 20, 255])
-    mask_white = cv2.inRange(hsv, lower_white, upper_white)
+    # Convert bounds to numpy arrays
+    lower_white = np.array(white_lower, dtype=np.uint8)
+    upper_white = np.array(white_upper, dtype=np.uint8)
+    lower_yellow = np.array(yellow_lower, dtype=np.uint8)
+    upper_yellow = np.array(yellow_upper, dtype=np.uint8)
     
-    # Yellow lane detection: [H, S, V]
-    # Adjusted to avoid detecting gray areas on the left side
-    lower_yellow = np.array([15, 60, 50])  # Higher S and V to avoid gray detection
-    upper_yellow = np.array([35, 255, 255])
+    # Threshold for both ranges
+    mask_white = cv2.inRange(hsv, lower_white, upper_white)
     mask_yellow = cv2.inRange(hsv, lower_yellow, upper_yellow)
     
     # Combine both masks
     mask = cv2.bitwise_or(mask_white, mask_yellow)
     
     # Morphological operations
-    kernel = np.ones((3, 3), np.uint8)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
-    mask = cv2.dilate(mask, kernel, iterations=2)
+    kernel = np.ones((morph_kernel_size, morph_kernel_size), np.uint8)
+    if morph_open_iter > 0:
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=morph_open_iter)
+    if morph_close_iter > 0:
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=morph_close_iter)
+    if morph_dilate_iter > 0:
+        mask = cv2.dilate(mask, kernel, iterations=morph_dilate_iter)
     
     return mask
 
@@ -109,17 +132,17 @@ def apply_color_threshold(frame_roi):
 #                3. EDGE DETECTION (CANNY)
 # ============================================================
 
-def apply_canny(mask, low_threshold=50, high_threshold=150, blur_kernel=5):
+def apply_canny(mask, low_threshold, high_threshold, blur_kernel):
     """
-    Apply Canny edge detection to extract precise lane line edges.
+    Generic Canny edge detection with pre-blur.
     
-    Parameters tuned in: 04_canny_edge_detection.ipynb
+    All numeric thresholds and kernel sizes are controlled by the caller.
     
     Args:
-        mask: Binary mask from color thresholding (grayscale, 0-255)
-        low_threshold: Lower threshold for hysteresis (default: 50)
-        high_threshold: Upper threshold for hysteresis (default: 150)
-        blur_kernel: Gaussian blur kernel size, must be odd (default: 5)
+        mask: Binary or grayscale image (0-255)
+        low_threshold: Lower threshold for hysteresis
+        high_threshold: Upper threshold for hysteresis
+        blur_kernel: Gaussian blur kernel size (must be odd)
     
     Returns:
         edges: Binary edge map (255 = edge, 0 = no edge)
@@ -137,23 +160,24 @@ def apply_canny(mask, low_threshold=50, high_threshold=150, blur_kernel=5):
 #                4. LINE DETECTION (HOUGH TRANSFORM)
 # ============================================================
 
-def detect_lines_hough(edges, 
-                       rho=1,
-                       theta=np.pi/180,
-                       threshold=30,
-                       min_line_length=40,
-                       max_line_gap=100):
+def detect_lines_hough(
+    edges,
+    rho,
+    theta,
+    threshold,
+    min_line_length,
+    max_line_gap,
+):
     """
-    Detect straight lines using Probabilistic Hough Transform.
+    Generic straight-line detection using Probabilistic Hough Transform.
     
-    This function converts edge pixels into straight line segments.
-    
-    Parameters to tune in: 05_line_detection.ipynb
+    All Hough parameters are passed in so this function is independent
+    of any particular application.
     
     Args:
         edges: Binary edge map from Canny detection
         rho: Distance resolution in pixels
-        theta: Angle resolution in radians (np.pi/180 = 1 degree)
+        theta: Angle resolution in radians
         threshold: Minimum number of intersections to detect a line
         min_line_length: Minimum length of line segment in pixels
         max_line_gap: Maximum gap between points to be considered same line
@@ -168,7 +192,7 @@ def detect_lines_hough(edges,
         theta=theta,
         threshold=threshold,
         minLineLength=min_line_length,
-        maxLineGap=max_line_gap
+        maxLineGap=max_line_gap,
     )
     
     return lines
