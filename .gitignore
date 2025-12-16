@@ -8,3 +8,14 @@
 data/raw/
 data/processed/*.mp4
 data/processed/*.avi
+
+# Notebooks
+notebooks/
+*.ipynb
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+*.pyo
