@@ -336,6 +336,11 @@ def process_video(video_path, output_path, max_frames=None, start_frame=0):
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+    # Resize output for smaller file (e.g., 1280x720)
+    target_width = 1280
+    target_height = 720
+    resize_output = True if width > target_width or height > target_height else False
     
     print(f"{'='*60}")
     print(f"VIDEO INFO")
@@ -357,17 +362,16 @@ def process_video(video_path, output_path, max_frames=None, start_frame=0):
         print(f"⏩ Skipping to frame {start_frame}\n")
     
     # Video writer setup
-    output_fps = fps // 2
-    fourcc = cv2.VideoWriter_fourcc(*'XVID')
-    out = cv2.VideoWriter(output_path, fourcc, output_fps, (width, height))
-    
-    # Check if writer opened successfully
+    output_fps = max(10, fps // 2)  # Lower FPS for smaller file, min 10
+    # Try H.264 first, fallback to mp4v
+    fourcc = cv2.VideoWriter_fourcc(*'avc1')  # H.264
+    out = cv2.VideoWriter(output_path, fourcc, output_fps, (target_width, target_height) if resize_output else (width, height))
     if not out.isOpened():
-        print("⚠️ XVID failed, trying mp4v...")
+        print("⚠️ H.264 not available, falling back to mp4v...")
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        out = cv2.VideoWriter(output_path, fourcc, output_fps, (width, height))
+        out = cv2.VideoWriter(output_path, fourcc, output_fps, (target_width, target_height) if resize_output else (width, height))
         if not out.isOpened():
-            print("❌ Fatal: Cannot create video writer")
+            print("❌ Fatal: Cannot create video writer (mp4v)")
             cap.release()
             return
     
@@ -399,52 +403,52 @@ def process_video(video_path, output_path, max_frames=None, start_frame=0):
         # ============ PIPELINE (from pipeline.py) ============
         # All parameters here are the concrete "lane-detection" tuning.
         
-        # 1. ROI (trapezoid over the road)
+        # 1. ROI (trapezoid over the road) - parameters from notebook
         roi_params = {
-            "top_y_ratio": 0.6,
-            "left_bottom_ratio": 0.05,
-            "right_bottom_ratio": 0.98,
-            "top_left_x_ratio": 0.40,
-            "top_right_x_ratio": 0.65,
+            "top_y_ratio": 0.6,           # Top of trapezoid (60% of height)
+            "left_bottom_ratio": 0.05,     # Left edge at bottom (5% of width)
+            "right_bottom_ratio": 0.98,    # Right edge at bottom (98% of width)
+            "top_left_x_ratio": 0.45,      # Left edge at top (45% of width)
+            "top_right_x_ratio": 0.55,     # Right edge at top (55% of width)
         }
         frame_roi, roi_pts = apply_roi_mask(frame, **roi_params)
-        
-        # 2. Color threshold (white & yellow lanes)
+
+        # 2. Color threshold (white & yellow lanes) - parameters from notebook
         color_params = {
-            "white_lower": (0, 0, 190),
-            "white_upper": (180, 20, 255),
-            "yellow_lower": (15, 60, 50),
-            "yellow_upper": (35, 255, 255),
-            "morph_kernel_size": 3,
-            "morph_open_iter": 1,
-            "morph_close_iter": 2,
-            "morph_dilate_iter": 2,
+            "white_lower": (0, 0, 190),      # Lower bound for white lines
+            "white_upper": (180, 20, 255),   # Upper bound for white lines
+            "yellow_lower": (15, 60, 90),     # Lower bound for yellow lines
+            "yellow_upper": (35, 255, 255),  # Upper bound for yellow lines
+            "morph_kernel_size": 3,          # Kernel size for morphological operations
+            "morph_open_iter": 1,            # Opening iterations (noise removal)
+            "morph_close_iter": 2,           # Closing iterations (fill gaps)
+            "morph_dilate_iter": 2,          # Dilation iterations (thicken lines)
         }
         color_mask = apply_color_threshold(frame_roi, **color_params)
-        
-        # 3. Canny edges
+
+        # 3. Canny edges - parameters from notebook
         canny_params = {
-            "low_threshold": 50,
-            "high_threshold": 150,
-            "blur_kernel": 5,
+            "low_threshold": 50,      # Lower threshold for hysteresis
+            "high_threshold": 150,    # Upper threshold for hysteresis
+            "blur_kernel": 5,         # Gaussian blur kernel size (must be odd)
         }
         edges = apply_canny(color_mask, **canny_params)
-        
-        # 4. Detect lines (Hough)
+
+        # 4. Detect lines (Hough) - parameters from notebook
         hough_params = {
-            "rho": 1,
-            "theta": np.pi / 180,
-            "threshold": 15,
-            "min_line_length": 40,
-            "max_line_gap": 20,
+            "rho": 1,                    # Distance resolution in pixels
+            "theta": np.pi / 180,        # Angle resolution in radians (1 degree)
+            "threshold": 15,             # Minimum number of intersections to detect a line
+            "min_line_length": 40,       # Minimum line segment length in pixels
+            "max_line_gap": 20,          # Maximum gap between points on same line
         }
         lines = detect_lines_hough(edges, **hough_params)
-        
+
         # ============ LINE DETECTION & PROCESSING ============
-        
-        # 5. Filter by slope
-        left_lines, right_lines = filter_lines_by_slope(lines, min_slope=0.5)
-        
+
+        # 5. Filter by slope - parameters from notebook
+        left_lines, right_lines = filter_lines_by_slope(lines, min_slope=0.5, max_slope=2.0)
+
         # 6. Fit lane lines
         left_lane = fit_lane_line(left_lines, height)
         right_lane = fit_lane_line(right_lines, height)
@@ -515,6 +519,9 @@ def process_video(video_path, output_path, max_frames=None, start_frame=0):
             
             cv2.putText(result, text, (text_x, text_y), font, font_scale, color, thickness)
         
+        # Resize output frame if needed
+        if resize_output:
+            result = cv2.resize(result, (target_width, target_height), interpolation=cv2.INTER_AREA)
         # Write frame
         out.write(result)
         
@@ -538,7 +545,7 @@ def process_video(video_path, output_path, max_frames=None, start_frame=0):
 if __name__ == "__main__":
     # Set paths
     video_path = os.path.join('..', 'data', 'processed', 'highway_clip.mp4')
-    output_path = os.path.join('..', 'output', 'test_pipeline.avi')
+    output_path = os.path.join('..', 'output', 'test_pipeline.mp4')
     
     # Create output directory if needed
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
