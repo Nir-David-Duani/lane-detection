@@ -12,7 +12,7 @@
 
 ## 📄 Project Report
 
-[Click here to view the PDF report](../Lane%20Detection%20-%20Report.pdf)
+[Click here to view the PDF report](https://drive.google.com/file/d/110jubpTy2bF-_Od40GM9f_3RKa2BE_Qs/view?usp=drive_link)
 
 ---
 
