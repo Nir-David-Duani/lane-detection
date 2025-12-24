@@ -1,6 +1,21 @@
 """
 Night-Time Lane Detection Enhancement
 =====================================
+This module implements lane detection optimized for night-time and low-light conditions.
+
+The pipeline includes:
+1. ROI masking
+2. CLAHE enhancement for contrast improvement
+3. Bilateral filtering for noise reduction
+4. Threshold-based lane extraction
+5. Canny edge detection
+6. Hough line detection
+7. Temporal smoothing and lane change detection
+
+Key features:
+- Robust performance in low-light conditions
+- Temporal smoothing for stable lane tracking
+- Lane change detection based on missing lane periods
 """
 
 import cv2
@@ -22,26 +37,30 @@ from line_detection import (
 )
 
 
-############################################################
-#              LANE CHANGE DETECTION & SMOOTHING           #
-############################################################
+# ============================================================
+#              LANE CHANGE DETECTION & SMOOTHING
+# ============================================================
 from collections import deque
 
 class LaneChangeDetector:
     """
     Detect lane changes and smooth lane lines using temporal tracking.
+    
     This class maintains a history of detected lane lines across frames
     and provides:
     - Smoothed lane lines (averaged over history)
     - Lane change detection (based on missing lane detection period)
+    
     Args:
         history_size: Number of frames to keep in history (default: 10)
         missing_frames_threshold: Number of consecutive frames with missing lanes to detect lane change (default: 10)
         min_valid: Minimum number of valid frames needed for detection (default: 4)
     """
+    
     def __init__(self, history_size=10, missing_frames_threshold=10, min_valid=4):
         """
         Initialize lane change detector.
+        
         Args:
             history_size: Number of frames to track (larger = smoother but slower response)
             missing_frames_threshold: Consecutive frames without both lanes to detect lane change
@@ -59,9 +78,11 @@ class LaneChangeDetector:
     def update(self, left_line, right_line):
         """
         Update detector with new frame and return smoothed lines + lane change flag.
+        
         Args:
             left_line: Left lane line [x_top, y_top, x_bottom, y_bottom] or None
             right_line: Right lane line [x_top, y_top, x_bottom, y_bottom] or None
+        
         Returns:
             tuple: (smoothed_left, smoothed_right, lane_change_detected)
                 - smoothed_left: Smoothed left line or None
@@ -81,8 +102,10 @@ class LaneChangeDetector:
     def _smooth_line(self, history):
         """
         Smooth a line by averaging over history.
+        
         Args:
             history: Deque of line detections [x_top, y_top, x_bottom, y_bottom]
+        
         Returns:
             Smoothed line [x_top, y_top, x_bottom, y_bottom] or None
         """
@@ -99,8 +122,10 @@ class LaneChangeDetector:
     def _detect_lane_change(self):
         """
         Detect lane change based on consecutive frames with missing lane detection.
+        
         Lane change is detected when both lanes are missing for a significant
         number of consecutive frames (indicating the vehicle is between lanes).
+        
         Returns:
             bool: True if lane change detected, False otherwise
         """
@@ -140,6 +165,9 @@ def process_video_night_robust(video_path, output_path, max_frames=None, start_f
         output_path: Path to save output video (with drawn lanes)
         max_frames: Limit number of frames (None = all)
         start_frame: Frame to start from (default: 0)
+    
+    Returns:
+        None: Output video is saved to output_path
     """
     cap = cv2.VideoCapture(video_path)
     
