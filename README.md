@@ -1,5 +1,5 @@
 
-# Lane Detection System
+# Lane Detection
 
 ---
 
