@@ -9,6 +9,12 @@
 
 ---
 
+## 📄 Project Report
+
+[Click here to view the PDF report](file:///C:/Users/nirdu/Documents/ComputerVision_Course/Submissions_Zips/Project1-Lane%20Detection/Lane%20Detection%20-%20Report.pdf)
+
+---
+
 A comprehensive computer vision system for detecting lane lines, curves, crosswalks, and lane changes in driving videos. This project implements multiple detection pipelines optimized for different scenarios including daytime, nighttime, and curved roads.
 
 ## Project Overview
