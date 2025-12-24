@@ -9,9 +9,10 @@
 
 ---
 
+
 ## 📄 Project Report
 
-[Click here to view the PDF report](file:///C:/Users/nirdu/Documents/ComputerVision_Course/Submissions_Zips/Project1-Lane%20Detection/Lane%20Detection%20-%20Report.pdf)
+[Click here to view the PDF report](../Lane%20Detection%20-%20Report.pdf)
 
 ---
 
