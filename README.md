@@ -5,7 +5,7 @@
 ## Visual Demos
 
 **Lane change detection (temporal tracking):**  
-<img src="results/lane_change.gif" width="500">
+<img src="results/lane change.gif" width="500">
 
 **Crosswalk detection with lane suppression:**  
 <img src="results/crosswalk.gif" width="500">
